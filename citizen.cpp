@@ -1119,7 +1119,7 @@ int CNPC_Citizen::CountNPCsUsingProp(CBaseEntity* pProp)
 	{
 		// Try to convert to Citizen
 		CNPC_Citizen* pCitizen = dynamic_cast<CNPC_Citizen*>(pEntity);
-		if (!pCitizen || pCitizen == this) // Não contar a si mesmo
+		if (!pCitizen || pCitizen == this) // Do not count itself
 			continue;
 
 		// CRASH PREVENTION: Skip dead/dying NPCs to avoid race conditions during cover search
