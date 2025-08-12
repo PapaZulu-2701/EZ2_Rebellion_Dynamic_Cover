@@ -1114,15 +1114,21 @@ int CNPC_Citizen::CountNPCsUsingProp(CBaseEntity* pProp)
 	int count = 0;
 	CBaseEntity* pEntity = NULL;
 
-	// Buscar todas as entidades num raio da prop
-	for (CEntitySphereQuery sphere(pProp->GetAbsOrigin(), 600.0f); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity())
+	// Search for all entities within prop radius
+	for (CEntitySphereQuery sphere(pProp->GetAbsOrigin(), 300.0f); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity())
 	{
-		// Tentar converter para Alyx
+		// Try to convert to Citizen
 		CNPC_Citizen* pCitizen = dynamic_cast<CNPC_Citizen*>(pEntity);
 		if (!pCitizen || pCitizen == this) // Não contar a si mesmo
 			continue;
 
-		// Verificar se está usando a mesma prop
+		// CRASH PREVENTION: Skip dead/dying NPCs to avoid race conditions during cover search
+		// This prevents crashes when NPCs die exactly during timer-triggered cover calculations
+		// Double validation ensures maximum safety against timing-critical scenarios
+		if (pCitizen->GetHealth() <= 0 || !pCitizen->IsAlive())
+			continue;
+
+		// Check if using the same prop
 		if (pCitizen->m_hLowCoverProp == pProp || pCitizen->m_hHighCoverProp == pProp)
 		{
 			count++;
@@ -1820,85 +1826,85 @@ void CNPC_Citizen::GatherConditions()
 #ifdef EZ
 	GatherWillpowerConditions();
 #endif
-	if( IsInPlayerSquad() && hl2_episodic.GetBool() )
+	if (IsInPlayerSquad() && hl2_episodic.GetBool())
 	{
 		// Leave the player squad if someone has made me neutral to player.
-		if( IRelationType(UTIL_GetLocalPlayer()) == D_NU )
+		if (IRelationType(UTIL_GetLocalPlayer()) == D_NU)
 		{
 			RemoveFromPlayerSquad();
 		}
 	}
 
-	if ( !SpokeConcept( TLK_JOINPLAYER ) && IsRunningScriptedSceneWithSpeech( this, true ) )
+	if (!SpokeConcept(TLK_JOINPLAYER) && IsRunningScriptedSceneWithSpeech(this, true))
 	{
-		SetSpokeConcept( TLK_JOINPLAYER, NULL );
-		for ( int i = 0; i < g_AI_Manager.NumAIs(); i++ )
+		SetSpokeConcept(TLK_JOINPLAYER, NULL);
+		for (int i = 0; i < g_AI_Manager.NumAIs(); i++)
 		{
-			CAI_BaseNPC *pNpc = g_AI_Manager.AccessAIs()[i];
-			if ( pNpc != this && pNpc->GetClassname() == GetClassname() && pNpc->GetAbsOrigin().DistToSqr( GetAbsOrigin() ) < Square( 15*12 ) && FVisible( pNpc ) )
+			CAI_BaseNPC* pNpc = g_AI_Manager.AccessAIs()[i];
+			if (pNpc != this && pNpc->GetClassname() == GetClassname() && pNpc->GetAbsOrigin().DistToSqr(GetAbsOrigin()) < Square(15 * 12) && FVisible(pNpc))
 			{
-				(assert_cast<CNPC_Citizen *>(pNpc))->SetSpokeConcept( TLK_JOINPLAYER, NULL );
+				(assert_cast<CNPC_Citizen*>(pNpc))->SetSpokeConcept(TLK_JOINPLAYER, NULL);
 			}
 		}
 	}
 
-	if( ShouldLookForHealthItem() )
+	if (ShouldLookForHealthItem())
 	{
-		if( FindHealthItem( GetAbsOrigin(), Vector( 240, 240, 240 ) ) )
-			SetCondition( COND_HEALTH_ITEM_AVAILABLE );
+		if (FindHealthItem(GetAbsOrigin(), Vector(240, 240, 240)))
+			SetCondition(COND_HEALTH_ITEM_AVAILABLE);
 		else
-			ClearCondition( COND_HEALTH_ITEM_AVAILABLE );
+			ClearCondition(COND_HEALTH_ITEM_AVAILABLE);
 
 		m_flNextHealthSearchTime = gpGlobals->curtime + 4.0;
 	}
 
 	// If the player is standing near a medic and can see the medic, 
 	// assume the player is 'staring' and wants health.
-	if( CanHeal() )
+	if (CanHeal())
 	{
-		CBasePlayer *pPlayer = AI_GetSinglePlayer();
+		CBasePlayer* pPlayer = AI_GetSinglePlayer();
 
-		if ( !pPlayer )
+		if (!pPlayer)
 		{
 			m_flTimePlayerStare = FLT_MAX;
 			return;
 		}
 
-		float flDistSqr = ( GetAbsOrigin() - pPlayer->GetAbsOrigin() ).Length2DSqr();
+		float flDistSqr = (GetAbsOrigin() - pPlayer->GetAbsOrigin()).Length2DSqr();
 		float flStareDist = sk_citizen_player_stare_dist.GetFloat();
 		float flPlayerDamage = pPlayer->GetMaxHealth() - pPlayer->GetHealth();
 
-		if( pPlayer->IsAlive() && flPlayerDamage > 0 && (flDistSqr <= flStareDist * flStareDist) && pPlayer->FInViewCone( this ) && pPlayer->FVisible( this )
+		if (pPlayer->IsAlive() && flPlayerDamage > 0 && (flDistSqr <= flStareDist * flStareDist) && pPlayer->FInViewCone(this) && pPlayer->FVisible(this)
 #ifdef EZ2
 			&& (!IsSurrendered() /*|| m_SurrenderBehavior.IsSurrenderIdleStanding()*/) // For now, surrendered medics only heal if you +USE them
 #endif
 			)
 		{
-			if( m_flTimePlayerStare == FLT_MAX )
+			if (m_flTimePlayerStare == FLT_MAX)
 			{
 				// Player wasn't looking at me at last think. He started staring now.
 				m_flTimePlayerStare = gpGlobals->curtime;
 			}
 
 			// Heal if it's been long enough since last time I healed a staring player.
-			if( gpGlobals->curtime - m_flTimePlayerStare >= sk_citizen_player_stare_time.GetFloat() && gpGlobals->curtime > m_flTimeNextHealStare && !IsCurSchedule( SCHED_CITIZEN_HEAL ) )
+			if (gpGlobals->curtime - m_flTimePlayerStare >= sk_citizen_player_stare_time.GetFloat() && gpGlobals->curtime > m_flTimeNextHealStare && !IsCurSchedule(SCHED_CITIZEN_HEAL))
 			{
-				if ( ShouldHealTarget( pPlayer, true ) )
+				if (ShouldHealTarget(pPlayer, true))
 				{
-					SetCondition( COND_CIT_PLAYERHEALREQUEST );
+					SetCondition(COND_CIT_PLAYERHEALREQUEST);
 				}
 				else
 				{
 					m_flTimeNextHealStare = gpGlobals->curtime + sk_citizen_stare_heal_time.GetFloat() * .5f;
-					ClearCondition( COND_CIT_PLAYERHEALREQUEST );
+					ClearCondition(COND_CIT_PLAYERHEALREQUEST);
 				}
 			}
 
 #ifdef HL2_EPISODIC
 			// Heal if I'm on an assault. The player hasn't had time to stare at me.
-			if( m_AssaultBehavior.IsRunning() && IsMoving() )
+			if (m_AssaultBehavior.IsRunning() && IsMoving())
 			{
-				SetCondition( COND_CIT_PLAYERHEALREQUEST );
+				SetCondition(COND_CIT_PLAYERHEALREQUEST);
 			}
 #endif
 		}
@@ -1927,7 +1933,10 @@ void CNPC_Citizen::GatherConditions()
 		}
 
 		// Check if enemy is too close to current props
-		Vector enemyPos = GetEnemy()->GetAbsOrigin();
+		CBaseEntity* pEnemy = GetEnemy();
+		if (!pEnemy) return; // CRASH PREVENTION: Validate enemy exists
+
+		Vector enemyPos = pEnemy->GetAbsOrigin();
 		const float MIN_COVER_DISTANCE = 150.0f;
 		bool enemyTooClose = (m_hLowCoverProp && enemyPos.DistTo(m_hLowCoverProp->GetAbsOrigin()) < MIN_COVER_DISTANCE) ||
 			(m_hHighCoverProp && enemyPos.DistTo(m_hHighCoverProp->WorldSpaceCenter()) < MIN_COVER_DISTANCE);
@@ -1952,7 +1961,7 @@ void CNPC_Citizen::GatherConditions()
 				for (CEntitySphereQuery sphere(m_hLowCoverProp->GetAbsOrigin(), 100.0f); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity())
 				{
 					CAI_BaseNPC* pNPC = dynamic_cast<CAI_BaseNPC*>(pEntity);
-					if (pNPC && pNPC != this && IRelationType(pNPC) == D_HT) // Enemy NPC
+					if (pNPC && pNPC != this && IRelationType(pNPC) == D_HT) // Check for enemy relationship
 					{
 						enemyNPCNearCover = true;
 						break;
@@ -1986,7 +1995,7 @@ void CNPC_Citizen::GatherConditions()
 				for (CEntitySphereQuery sphere(m_hHighCoverProp->WorldSpaceCenter(), 100.0f); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity())
 				{
 					CAI_BaseNPC* pNPC = dynamic_cast<CAI_BaseNPC*>(pEntity);
-					if (pNPC && pNPC != this && IRelationType(pNPC) == D_HT) // Enemy NPC
+					if (pNPC && pNPC != this && IRelationType(pNPC) == D_HT) // Check for enemy relationship
 					{
 						enemyNPCNearCover = true;
 						break;
@@ -2006,8 +2015,8 @@ void CNPC_Citizen::GatherConditions()
 				}
 			}
 		}
-	}
-	// [MODIFICATION-Dynamic Cover] - End
+	} // [MODIFICATION-Dynamic Cover] - End
+	
 }
 
 //-----------------------------------------------------------------------------
